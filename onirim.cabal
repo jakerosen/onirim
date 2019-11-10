@@ -4,5 +4,17 @@ version: 0
 
 executable onirim
   main-is: Main.hs
-  build-depends: base
+  build-depends:
+      base
+    , random-shuffle
+    , monad-loops
+    , lens
+    , generic-lens
+  default-extensions:
+      ScopedTypeVariables
+    , OverloadedStrings
+    , DerivingStrategies
+    , DeriveGeneric
+    , TypeApplications
+    , DataKinds
   ghc-options: -Wall

@@ -1,0 +1,8 @@
+cabal-version: 2.4
+name: onirim
+version: 0
+
+executable onirim
+  main-is: Main.hs
+  build-depends: base
+  ghc-options: -Wall

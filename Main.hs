@@ -2,16 +2,15 @@ module Main where
 
 import System.Random.Shuffle
 import Data.List
+import Data.Either
 import GHC.Generics
 import Control.Lens
 import Data.Generics.Product.Any
 
 main :: IO ()
 main = do
-  deck :: [Card] <- shuffleM initDeck
-  let
-    game :: Game
-    game = iterate draw (Game deck [] []) !! 4 -- draw 5 cards
+  deck :: [Card] <- shuffleM sunMoonKeyDeck
+  game <- initGame
   mainLoop game
 
 mainLoop :: Game -> IO ()
@@ -30,7 +29,7 @@ data Game = Game
   , gameTableau :: [Card]
   } deriving stock (Generic)
 
-data Symbol = Sun | Moon | Key -- | Door
+data Symbol = Sun | Moon | Key | Door
   deriving (Eq)
 
 data Color = Red | Blue | Green | Brown
@@ -41,13 +40,18 @@ data Card = Card
   , cardSymbol :: Symbol
   } deriving (Eq)
 
+sameSymbol :: Card -> Card -> Bool
+sameSymbol a b = cardSymbol a == cardSymbol b
+
+-- data Fail = Fail
+
 -- data Player = Player
 --   { playerHand :: [Card]
 --   , playerTableau :: [Card]
 --   } -- deriving stock (Generic)
 
 -- possible actions are placing a card or discarding a card
-data Action = PlaceCard Card | DiscardCard Card
+data Action = PlaceCard Card | DiscardCard Card | GameLoss
 
 -- Cards in deck
 --
@@ -78,8 +82,8 @@ data Action = PlaceCard Card | DiscardCard Card
 -- 10 Nightmares
 
 -- generate cards of the deck
-initDeck :: [Card]
-initDeck = concatMap genCards [Red, Blue, Green, Brown]
+sunMoonKeyDeck :: [Card]
+sunMoonKeyDeck = concatMap genCards [Red, Blue, Green, Brown]
 
 -- generate cards of this color
 genCards :: Color -> [Card]
@@ -96,34 +100,55 @@ genCards c =
       Green -> 7
       Brown -> 6
 
+addNMDoors :: [Card] -> [Card]
+addNMDoors deck =
+  (replicate 2 (flip Card Door) <*> [Red, Blue, Green, Brown])
+  -- ++ nightmares
+  ++ deck
+
+initGame :: IO Game
+initGame = do
+  deck :: [Card] <- shuffleM sunMoonKeyDeck
+  let
+    hand :: [Card]
+    hand = take 5 deck
+    deck' = deck -- temp; only for non-Door version
+  -- deck' [Card] <- shuffleM (addNMDoors deck)
+  pure (Game deck' hand [])
+
 -- checks whether the game is over
 -- currently, the game is only over if the deck is empty
 gameOver :: Game -> Bool
 gameOver (Game deck _ _) = null deck
 
 -- draw a card from the deck, adding it to player hand
-draw :: Game -> Game
-draw (Game [] _ _) = undefined -- might have to be maybe function
-draw (Game (x:xs) hand tableau) = Game xs (x:hand) tableau
+draw :: Game -> Either Action Game
+draw (Game [] _ _) = Left GameLoss
+draw (Game (x:xs) hand tableau) = Right $ Game xs (x:hand) tableau
 
 -- place card from hand onto tableau or do nothing if the card is not in hand
-place :: Card -> Game -> Game
-place card game = case find (==card) (game ^. the @"gameHand") of
-  -- if card is in game hand
-  Nothing -> game -- card wasn't found, do nothing
-  Just c -> game -- card found
-    & discard c -- discard it from hand
-    & the @"gameTableau" %~ (c:) -- add it to tableau
-  -- if card `elem` hand
-  --   then Game deck (delete card hand) (card:tableau)
-  --   else game
+place :: Card -> Game -> Maybe Game
+place card game = do
+  card' <- find (==card) (gameHand game)
+  -- symbol of card cannot match symbol of Tableau head
+  let
+    lastCard :: Card
+    lastCard = (head (gameTableau game))
+  if sameSymbol card' lastCard
+    then Nothing -- if same symbol as last card, don't play it
+    else Just $ game -- if different symbol, play it
+      & the @"gameHand" %~ delete card' -- discard it from hand
+      & the @"gameTableau" %~ (card':) -- add it to tableau
 
 -- remove card from hand
-discard :: Card -> Game -> Game
-discard card = the @"gameHand" %~ delete card
+discard :: Card -> Game -> Maybe Game
+discard card game = do
+  card' <- find (==card) (gameHand game)
+  Just (game & the @"gameHand" %~ delete card')
 
 -- take a turn with given action
-takeTurn :: Action -> Game -> Game
+takeTurn :: Action -> Game -> Maybe Game
 takeTurn action = case action of
   PlaceCard c -> place c
   DiscardCard c -> discard c
+  _ -> undefined

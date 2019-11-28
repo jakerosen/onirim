@@ -6,6 +6,12 @@ import Data.Either
 import GHC.Generics
 import Control.Lens
 import Data.Generics.Product.Any
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
+import Text.Read
+import Text.Printf
+import Data.Maybe
 
 main :: IO ()
 main = do
@@ -14,13 +20,66 @@ main = do
   mainLoop game
 
 mainLoop :: Game -> IO ()
-mainLoop game@(Game deck hand tableau) = if gameOver game
-  then putStrLn "Game over!"
-  else do
-    undefined
-    -- get action from player
+mainLoop game@(Game deck hand tableau) = do
+  -- get action from player
+  let
+    selectActionMenu :: String
+    selectActionMenu = printf
+      (  "Your hand: %s\n"
+      ++ "Select an action:\n"
+      ++ "1. Play a Card"
+      ++ "2. Discard a Card")
+      (intercalate ", " (map show hand))
+
+  actI :: Int <- menuChoice selectActionMenu (1, 2)
+
+  let
+    handMenu :: [String]
+    handMenu = zipWith
+      (\i card -> printf "%s. %s" (show i) (show card))
+      [1..]
+      hand
+
+    verb :: String
+    verb = if actI == 1 then "play" else "discard"
+
+    selectCardMenu :: String
+    selectCardMenu = printf
+      ("Select a card to %s:\n" ++ intercalate "\n" handMenu)
+      verb
+
+  cardI :: Int <- menuChoice selectCardMenu (1, length hand)
+  let
+    card :: Card
+    card = hand !! cardI
+
+    action :: Action
+    action = if actI == 1
+      then PlaceCard card
+      else DiscardCard card
+
     -- perform action
+    -- This really should never fail; it was probably too cautious to
+    -- make the takeTurn and other functions Maybe functions
+    game' :: Game
+    game' = fromJust $ takeTurn action game
+
     -- draw up to 5
+    -- need to draw each card individually and resolve appropriate actions
+    -- after each card draw (relevant for drawing Door and Nightmare, and
+    -- also relevant for losing the game if the deck is out of cards)
+
+  undefined
+
+menuChoice :: String -> (Int, Int) -> IO Int
+menuChoice menu (lo, hi) = do
+  putStrLn menu
+  choice :: Maybe Int <- readMaybe <$> getLine
+  case choice of
+    Nothing -> menuChoice menu (lo, hi)
+    Just x -> if x >= lo && x <= hi
+      then pure x
+      else menuChoice menu (lo, hi)
 
 -- Current game state
 data Game = Game
@@ -30,20 +89,21 @@ data Game = Game
   } deriving stock (Generic)
 
 data Symbol = Sun | Moon | Key | Door
-  deriving (Eq)
+  deriving (Eq, Show)
 
 data Color = Red | Blue | Green | Brown
-  deriving (Eq)
+  deriving (Eq, Show)
 
 data Card = Card
   { cardColor :: Color
   , cardSymbol :: Symbol
   } deriving (Eq)
 
+instance Show Card where
+  show (Card color symbol) = (show color) ++ " " ++ (show symbol)
+
 sameSymbol :: Card -> Card -> Bool
 sameSymbol a b = cardSymbol a == cardSymbol b
-
--- data Fail = Fail
 
 -- data Player = Player
 --   { playerHand :: [Card]
@@ -51,7 +111,12 @@ sameSymbol a b = cardSymbol a == cardSymbol b
 --   } -- deriving stock (Generic)
 
 -- possible actions are placing a card or discarding a card
-data Action = PlaceCard Card | DiscardCard Card | GameLoss
+data Action =
+    NoAction
+  | PlaceCard Card
+  | DiscardCard Card
+  | GameLoss
+  | DrawDoor Card
 
 -- Cards in deck
 --
@@ -122,9 +187,12 @@ gameOver :: Game -> Bool
 gameOver (Game deck _ _) = null deck
 
 -- draw a card from the deck, adding it to player hand
-draw :: Game -> Either Action Game
-draw (Game [] _ _) = Left GameLoss
-draw (Game (x:xs) hand tableau) = Right $ Game xs (x:hand) tableau
+draw :: Game -> (Action, Game)
+draw game@(Game [] _ _) = (GameLoss, game)
+draw game@(Game (x:xs) hand tableau) = case cardSymbol x of
+  Door -> (DrawDoor x, Game xs hand tableau)
+  -- Nightmare -> resolve nightmare
+  otherwise -> (NoAction, Game xs (x:hand) tableau)
 
 -- place card from hand onto tableau or do nothing if the card is not in hand
 place :: Card -> Game -> Maybe Game
@@ -151,4 +219,4 @@ takeTurn :: Action -> Game -> Maybe Game
 takeTurn action = case action of
   PlaceCard c -> place c
   DiscardCard c -> discard c
-  _ -> undefined
+  _ -> \_ -> Nothing
